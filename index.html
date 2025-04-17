@@ -102,6 +102,22 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
     const groups = {};
+
+// Load data from localStorage on page load
+window.onload = function() {
+  const savedData = localStorage.getItem('expenseAppData');
+  if (savedData) {
+    const parsedData = JSON.parse(savedData);
+    Object.assign(groups, parsedData);
+    updateGroupSelect();
+    const firstGroup = Object.keys(groups)[0];
+    if (firstGroup) {
+      renderExpenses(firstGroup);
+      renderBalances(firstGroup);
+      renderChart(firstGroup);
+    }
+  }
+};
     const currencyRates = { USD: 1, EUR: 1.1, INR: 0.012 };
 
     function showToast(message) {
@@ -164,6 +180,7 @@
       renderExpenses(group);
       renderBalances(group);
       renderChart(group);
+  localStorage.setItem('expenseAppData', JSON.stringify(groups));
     }
 
     function renderExpenses(group) {
@@ -207,6 +224,7 @@
       renderBalances(group);
       renderChart(group);
       showToast("Expense deleted!");
+  localStorage.setItem('expenseAppData', JSON.stringify(groups));
     }
 
     function renderChart(group) {
@@ -255,6 +273,7 @@
           renderChart(firstGroup);
         }
         showToast("Data imported successfully!");
+      localStorage.setItem('expenseAppData', JSON.stringify(groups));
       };
       reader.readAsText(event.target.files[0]);
     }
