@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Expense Share App</title>
   <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database-compat.js"></script>
@@ -69,11 +69,11 @@
     </select>
     <input id="desc" placeholder="Description" />
     <div id="splitWithCheckboxes">
-      <label><input type="checkbox" value="ankur" /> ankur</label><br>
-      <label><input type="checkbox" value="bhargavi" /> bhargavi</label><br>
-      <label><input type="checkbox" value="venkatesh" /> venkatesh</label><br>
+      <label><input type="checkbox" value="ankur"> ankur</label><br>
+      <label><input type="checkbox" value="bhargavi"> bhargavi</label><br>
+      <label><input type="checkbox" value="venkatesh"> venkatesh</label><br>
     </div>
-    <label><input id="selectAll" type="checkbox" onchange="toggleSelectAll()" /> select all</label>
+    <label><input id="selectAll" type="checkbox" onchange="toggleSelectAll()"> select all</label>
     <button onclick="addExpense()">Add</button>
     <ul id="expenseList"></ul>
   </div>
@@ -131,7 +131,117 @@ function resetDatabase() {
   }
 }
 
-// Fetch data and initialize app
+function createGroup() {
+  const name = document.getElementById('groupName').value.trim();
+  if (!name) {
+    showToast('Group name cannot be empty.');
+    return;
+  }
+  if (groups[name]) {
+    showToast('Group already exists.');
+    return;
+  }
+  groups[name] = { expenses: [], balances: {} };
+  saveToFirebase();
+  updateGroupSelect();
+  document.getElementById('groupName').value = '';
+  showToast('Group created!');
+}
+
+function updateGroupSelect() {
+  const select = document.getElementById('groupSelect');
+  select.innerHTML = '';
+  for (const name in groups) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('selectAll').checked;
+  document.querySelectorAll('#splitWithCheckboxes input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+
+function addExpense() {
+  const group = document.getElementById('groupSelect').value;
+  const payer = document.getElementById('payer').value;
+  const amount = parseFloat(document.getElementById('amount').value);
+  const currency = document.getElementById('currency').value;
+  const desc = document.getElementById('desc').value;
+  const checkboxes = document.querySelectorAll('#splitWithCheckboxes input[type=checkbox]');
+  const splitWith = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+  if (!group || isNaN(amount) || !desc || splitWith.length === 0) {
+    showToast('Fill all fields correctly.');
+    return;
+  }
+  const usdAmount = amount * currencyRates[currency];
+
+  const expense = { payer, amount: usdAmount, desc, splitWith };
+  groups[group].expenses.push(expense);
+
+  // Update balances
+  const allPeople = Array.from(new Set([payer, ...splitWith]));
+  const share = usdAmount / allPeople.length;
+  allPeople.forEach(person => {
+    groups[group].balances[person] = (groups[group].balances[person] || 0) - share;
+  });
+  groups[group].balances[payer] += usdAmount;
+
+  saveToFirebase();
+  renderExpenses(group);
+  renderBalances(group);
+  renderChart(group);
+  showToast('Expense added!');
+}
+
+function renderExpenses(group) {
+  const ul = document.getElementById('expenseList');
+  ul.innerHTML = '';
+  groups[group].expenses.forEach(exp => {
+    const li = document.createElement('li');
+    li.textContent = `${exp.payer} paid $${exp.amount.toFixed(2)} for ${exp.desc}`;
+    ul.appendChild(li);
+  });
+}
+
+function renderBalances(group) {
+  const pre = document.getElementById('balances');
+  const lines = [];
+  const balances = groups[group].balances || {};
+  for (const person in balances) {
+    const balance = balances[person];
+    if (balance < -0.01) {
+      lines.push(`${person} owes $${Math.abs(balance).toFixed(2)}`);
+    } else if (balance > 0.01) {
+      lines.push(`${person} is owed $${balance.toFixed(2)}`);
+    } else {
+      lines.push(`${person} is settled up`);
+    }
+  }
+  pre.textContent = lines.join('\n');
+}
+
+function renderChart(group) {
+  const ctx = document.getElementById('expenseChart').getContext('2d');
+  const data = {};
+  groups[group].expenses.forEach(e => {
+    data[e.payer] = (data[e.payer] || 0) + e.amount;
+  });
+  const chartData = {
+    labels: Object.keys(data),
+    datasets: [{
+      label: 'Total Spent (USD)',
+      data: Object.values(data),
+      backgroundColor: Object.keys(data).map(() => `hsl(${Math.random()*360},70%,70%)`)
+    }]
+  };
+  if (window.expChart) window.expChart.destroy();
+  window.expChart = new Chart(ctx, { type: 'pie', data: chartData });
+}
+
+// Initial Firebase sync
 const loading = document.getElementById('loading');
 const app = document.getElementById('app');
 
@@ -150,8 +260,6 @@ db.ref('groups').on('value', snapshot => {
   loading.style.display = 'none';
   app.style.display = 'block';
 });
-
-// The rest of your app JS would go below here: createGroup, updateGroupSelect, addExpense, render functions etc.
 </script>
 </body>
 </html>
