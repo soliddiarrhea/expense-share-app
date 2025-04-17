@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense Share App</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .group, .expenses, .summary, .charts { margin-bottom: 2rem; }
+    input, select, button { margin: 5px; }
+    canvas { max-width: 600px; }
+    #toast {
+      visibility: hidden;
+      min-width: 250px;
+      margin-left: -125px;
+      background-color: #333;
+      color: #fff;
+      text-align: center;
+      border-radius: 5px;
+      padding: 12px;
+      position: fixed;
+      z-index: 1;
+      left: 50%;
+      bottom: 30px;
+      font-size: 14px;
+    }
+    #toast.show {
+      visibility: visible;
+      -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+      animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    }
+    @-webkit-keyframes fadein {
+      from { bottom: 0; opacity: 0; } 
+      to { bottom: 30px; opacity: 1; }
+    }
+    @keyframes fadein {
+      from { bottom: 0; opacity: 0; }
+      to { bottom: 30px; opacity: 1; }
+    }
+    @-webkit-keyframes fadeout {
+      from { bottom: 30px; opacity: 1; } 
+      to { bottom: 0; opacity: 0; }
+    }
+    @keyframes fadeout {
+      from { bottom: 30px; opacity: 1; }
+      to { bottom: 0; opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Expense Sharing App</h1>
+  <div class="group">
+    <h2>Create Group</h2>
+    <input id="groupName" placeholder="Group Name" />
+    <button onclick="createGroup()">Create</button>
+    <div id="groups"></div>
+  </div>
+
+  <div class="expenses">
+    <h2>Add Expense</h2>
+    <select id="groupSelect"></select>
+    <select id="payer">
+      <option value="ankur">ankur</option>
+      <option value="bhargavi">bhargavi</option>
+      <option value="venkatesh">venkatesh</option>
+    </select>
+    <input id="amount" type="number" placeholder="Amount" />
+    <select id="currency">
+      <option value="USD">USD</option>
+      <option value="EUR">EUR</option>
+      <option value="INR">INR</option>
+    </select>
+    <input id="desc" placeholder="Description" />
+    <div id="splitWithCheckboxes">
+      <label><input type="checkbox" value="ankur" /> ankur</label><br>
+      <label><input type="checkbox" value="bhargavi" /> bhargavi</label><br>
+      <label><input type="checkbox" value="venkatesh" /> venkatesh</label><br>
+    </div>
+    <label><input id="selectAll" type="checkbox" onchange="toggleSelectAll()" /> select all</label>
+    <button onclick="addExpense()">Add</button>
+    <ul id="expenseList"></ul>
+  </div>
+
+  <div class="summary">
+    <h2>Balance Summary</h2>
+    <pre id="balances"></pre>
+  </div>
+
+  <div class="charts">
+    <h2>Expense Chart</h2>
+    <canvas id="expenseChart"></canvas>
+  </div>
+
+  <div class="export">
+    <h2>Data Sharing</h2>
+    <button onclick="downloadData()">Export Data</button>
+    <input type="file" onchange="uploadData(event)" />
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const groups = {};
+    const currencyRates = { USD: 1, EUR: 1.1, INR: 0.012 };
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.className = "show";
+      setTimeout(() => toast.className = toast.className.replace("show", ""), 3000);
+    }
+
+    function createGroup() {
+      const name = document.getElementById('groupName').value;
+      if (!name || groups[name]) return;
+      groups[name] = { expenses: [], members: new Set(), balances: {} };
+      updateGroupSelect();
+    }
+
+    function updateGroupSelect() {
+      const select = document.getElementById('groupSelect');
+      select.innerHTML = '';
+      for (let g in groups) {
+        const option = document.createElement('option');
+        option.value = g;
+        option.innerText = g;
+        select.appendChild(option);
+      }
+    }
+
+    function toggleSelectAll() {
+      const checked = document.getElementById('selectAll').checked;
+      const checkboxes = document.querySelectorAll('#splitWithCheckboxes input[type=checkbox]');
+      checkboxes.forEach(cb => cb.checked = checked);
+    }
+
+    function addExpense() {
+      const group = document.getElementById('groupSelect').value;
+      const payer = document.getElementById('payer').value;
+      const amount = parseFloat(document.getElementById('amount').value);
+      const currency = document.getElementById('currency').value;
+      const desc = document.getElementById('desc').value;
+      const checkboxes = document.querySelectorAll('#splitWithCheckboxes input[type=checkbox]');
+      const splitWith = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+      const usdAmount = amount * currencyRates[currency];
+
+      if (!groups[group]) return;
+
+      groups[group].members.add(payer);
+      splitWith.forEach(person => groups[group].members.add(person));
+
+      const expense = { payer, amount: usdAmount, desc, splitWith };
+      groups[group].expenses.push(expense);
+
+      const allPeople = Array.from(new Set([payer, ...splitWith]));
+      const share = usdAmount / allPeople.length;
+
+      allPeople.forEach(person => {
+        groups[group].balances[person] = (groups[group].balances[person] || 0) - share;
+      });
+      groups[group].balances[payer] += usdAmount;
+
+      renderExpenses(group);
+      renderBalances(group);
+      renderChart(group);
+    }
+
+    function renderExpenses(group) {
+      const ul = document.getElementById('expenseList');
+      ul.innerHTML = '';
+      groups[group].expenses.forEach((exp, index) => {
+        const li = document.createElement('li');
+        li.innerHTML = `${exp.payer} paid $${exp.amount.toFixed(2)} for ${exp.desc} <button onclick="deleteExpense('${group}', ${index})">Delete</button>`;
+        ul.appendChild(li);
+      });
+    }
+
+    function renderBalances(group) {
+      const pre = document.getElementById('balances');
+      const lines = [];
+      for (let person in groups[group].balances) {
+        const balance = groups[group].balances[person];
+        if (balance < -0.01) {
+          lines.push(`${person} owes $${Math.abs(balance).toFixed(2)}`);
+        } else if (balance > 0.01) {
+          lines.push(`${person} is owed $${balance.toFixed(2)}`);
+        } else {
+          lines.push(`${person} is settled up`);
+        }
+      }
+      pre.innerText = lines.join('\n');
+    }
+
+    function deleteExpense(group, index) {
+      groups[group].expenses.splice(index, 1);
+      groups[group].balances = {};
+      groups[group].expenses.forEach(exp => {
+        const allPeople = Array.from(new Set([exp.payer, ...exp.splitWith]));
+        const share = exp.amount / allPeople.length;
+        allPeople.forEach(person => {
+          groups[group].balances[person] = (groups[group].balances[person] || 0) - share;
+        });
+        groups[group].balances[exp.payer] += exp.amount;
+      });
+      renderExpenses(group);
+      renderBalances(group);
+      renderChart(group);
+      showToast("Expense deleted!");
+    }
+
+    function renderChart(group) {
+      const ctx = document.getElementById('expenseChart').getContext('2d');
+      const data = {};
+      groups[group].expenses.forEach(e => {
+        data[e.payer] = (data[e.payer] || 0) + e.amount;
+      });
+
+      const chartData = {
+        labels: Object.keys(data),
+        datasets: [{
+          label: 'Total Spent (USD)',
+          data: Object.values(data),
+          backgroundColor: Object.keys(data).map(() => `hsl(${Math.random()*360}, 70%, 70%)`),
+        }],
+      };
+
+      if (window.expChart) window.expChart.destroy();
+      window.expChart = new Chart(ctx, {
+        type: 'pie',
+        data: chartData,
+      });
+    }
+
+    function downloadData() {
+      const dataStr = JSON.stringify(groups, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'expense_data.json';
+      link.click();
+      showToast("Data exported successfully!");
+    }
+
+    function uploadData(event) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const newData = JSON.parse(e.target.result);
+        Object.assign(groups, newData);
+        updateGroupSelect();
+        const firstGroup = Object.keys(groups)[0];
+        if (firstGroup) {
+          renderExpenses(firstGroup);
+          renderBalances(firstGroup);
+          renderChart(firstGroup);
+        }
+        showToast("Data imported successfully!");
+      };
+      reader.readAsText(event.target.files[0]);
+    }
+  </script>
+</body>
+</html>
